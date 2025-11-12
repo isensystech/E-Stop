@@ -2,21 +2,12 @@
 #include <Chrono.h>
 #include <EEPROM.h>
 
-//  NEW In this version:
-//
-//  * Buzzer needs to buzz after not receiving a heartbeat message from the transmitter unit for 1000ms
-//  * Blink pin13 onboard LED on every heartbeat message received.
-//  * Solid ON onboard LED (Pin 13) when the unit is powered on.
-//  * Buzzer must not stop buzzing when “E-Stopped” state changes to “Run” state.
-//
-//        -Scott McLeslie
-
-
 //create object
 EasyTransfer ET; 
 Chrono cwdt;
 Chrono rlytog;
-Chrono buzzerTimer;  // New timer for buzzer timeout
+Chrono buzzerTimer;  // NEW: Timer for 1000ms buzzer timeout
+Chrono overrideBuzzerTimer;  // NEW: Timer for 5-second periodic buzzer in override mode
 
 //#define RELAY_TESTING
 #define ESTOP_RX
@@ -29,7 +20,7 @@ Chrono buzzerTimer;  // New timer for buzzer timeout
 #define ESTOP_RUN 1
 
 #define RELAY_PULSE_TIME 1
-#define BUZZER_TIMEOUT 1000  // 1000ms before buzzer starts
+#define BUZZER_TIMEOUT 1000  // NEW: 1000ms before buzzer starts
 
 
 struct SEND_DATA_STRUCTURE {
@@ -79,6 +70,10 @@ SEND_DATA_STRUCTURE estop;
 #define RAD_M1 11
 #define RAD_AUX 2
 
+// NEW: E-stop override pins from schematic
+#define ESTOP_OVERRIDE_PIN 23
+#define ESTOP_OVERRIDE_LED_PIN 22
+
 #endif  //ESTOP_RX
 
 #ifdef ESTOP_TX
@@ -102,8 +97,9 @@ bool ononce = false; //Matt
 volatile signed long time_now;
 volatile signed long time_prev;
 
-bool buzzerActive = false;  // Track if buzzer should be active
-bool led13State = true;     // Track LED state for blinking
+// NEW: Variables for new features
+bool buzzerActive = false;
+int overrideBuzzerCount = 0;  // Track number of buzzes in override mode
 
 
 void setup() {
@@ -124,10 +120,6 @@ void setup() {
   digitalWrite(RAD_M0, LOW);  // Both M0 and M1 should be low for normal operation
   digitalWrite(RAD_M1, LOW);
   
-  // Turn on LED13 solid on power-up
-  digitalWrite(13, HIGH);
-  led13State = true;
-  
 #ifdef ESTOP_RX
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
@@ -138,6 +130,11 @@ void setup() {
   digitalWrite(RELAY2, RELAY_OFF);
   digitalWrite(RELAY3, RELAY_OFF);
   digitalWrite(RELAY4, RELAY_OFF);
+  
+  // NEW: Setup E-stop override
+  pinMode(ESTOP_OVERRIDE_PIN, INPUT_PULLUP);  // Pull-up so open = HIGH
+  pinMode(ESTOP_OVERRIDE_LED_PIN, OUTPUT);
+  digitalWrite(ESTOP_OVERRIDE_LED_PIN, LOW);
 #endif //ESTOP_RX
 
 #ifdef ESTOP_TX
@@ -152,8 +149,9 @@ void setup() {
   estop.relays = 1;
 #endif  //ESTOP_TX
 
-  // Start the buzzer timer
+  // NEW: Start the buzzer timers
   buzzerTimer.restart();
+  overrideBuzzerTimer.restart();
 }
 
 void loop() {
@@ -181,14 +179,16 @@ void loop() {
   
   if (ET.receiveData()) {    
     cwdt.restart();  //restart counter
-    buzzerTimer.restart();  // Restart buzzer timer on every valid packet
-    
-    // Blink LED13 on heartbeat reception
-    led13State = !led13State;
-    digitalWrite(13, led13State);
+    buzzerTimer.restart();  // NEW: Restart buzzer timer on every valid packet
     
     #ifdef ESTOP_RX
     Serial.println(estop.relays);
+    
+    // NEW: Blink E-stop override LED on heartbeat (if override not active)
+    bool overrideActive = (digitalRead(ESTOP_OVERRIDE_PIN) == HIGH);  // Active HIGH (open pins)
+    if (!overrideActive) {
+      digitalWrite(ESTOP_OVERRIDE_LED_PIN, !digitalRead(ESTOP_OVERRIDE_LED_PIN));
+    }
 
     if (estop.relays & 1) {  // Big red button got pushed
       estopState = ESTOP_STOP; 
@@ -205,7 +205,11 @@ void loop() {
         time_prev = time_now;
         ononce = true; //Matt
         digitalWrite(RELAY4, !digitalRead(RELAY4));
-      }    
+        //digitalWrite(13,!digitalRead(13));
+        //#if !defined(SILENT)
+        tone(13, 4000);
+        //#endif
+        }    
     }
     else {  // Big red button is up!
       if (runPackets <= ESTOP_MIN_RUN_PACKETS_LIMIT) {
@@ -217,6 +221,9 @@ void loop() {
         digitalWrite(RELAY2, RELAY_ON);
         digitalWrite(RELAY3, RELAY_OFF);
         digitalWrite(RELAY4, RELAY_OFF);
+        // NEW: Stop buzzer when returning to RUN state
+        noTone(13);
+        buzzerActive = false;
       }
       
     }
@@ -237,22 +244,35 @@ void loop() {
  
   #ifdef ESTOP_RX
   delay(50);
-
-  // Check if buzzer timeout has passed (1000ms without heartbeat)
-  if (buzzerTimer.hasPassed(BUZZER_TIMEOUT)) {
-    if (!buzzerActive) {
-      buzzerActive = true;
+  
+  // NEW: E-stop override LED control and buzzer
+  bool overrideActive = (digitalRead(ESTOP_OVERRIDE_PIN) == HIGH);  // Active HIGH (open pins)
+  if (overrideActive) {
+    // Override active - LED solid ON
+    digitalWrite(ESTOP_OVERRIDE_LED_PIN, HIGH);
+    
+    // Buzz every 5 seconds twice at half volume (2000Hz instead of 4000Hz)
+    if (overrideBuzzerTimer.hasPassed(5000)) {
+      overrideBuzzerTimer.restart();
+      overrideBuzzerCount = 0;  // Reset buzz counter
     }
-  } else {
-    // If we're receiving heartbeats, buzzer should not be active initially
-    // But once active, it stays active (doesn't stop when transitioning to RUN)
-    if (!buzzerActive) {
+    
+    // Generate two short buzzes
+    unsigned long elapsed = overrideBuzzerTimer.elapsed();
+    if (elapsed < 100 || (elapsed >= 200 && elapsed < 300)) {
+      // First buzz (0-100ms) or second buzz (200-300ms)
+      tone(13, 2000);  // Half the frequency = less loud
+    } else {
       noTone(13);
     }
+  } else {
+    // If override not active, LED blinks on heartbeat (handled in receiveData section above)
+    overrideBuzzerTimer.restart();  // Reset timer when not in override
   }
-
-  // If buzzer is active, keep it buzzing
-  if (buzzerActive) {
+  
+  // NEW: Check if buzzer should activate after 1000ms without heartbeat (only if not in override)
+  if (!overrideActive && buzzerTimer.hasPassed(BUZZER_TIMEOUT) && !buzzerActive) {
+    buzzerActive = true;
     tone(13, 4000);
   }
 
@@ -264,6 +284,10 @@ void loop() {
       if (abs(time_now - time_prev) > RELAY_PULSE_TIME * 1000) {
         time_prev = time_now;
         digitalWrite(RELAY4, !digitalRead(RELAY4));
+        //digitalWrite(13, !digitalRead(13));
+        //#if !defined(SILENT)
+          tone(13, 4000);
+        //#endif
       }
   }
   #endif  //ESTOP_RX
