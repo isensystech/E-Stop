@@ -169,12 +169,11 @@ Contributions are welcome! Please:
 5. Submit a pull request
 
 ## License
-
-[Choose appropriate license - MIT, GPL, etc.]
+GPL
 
 ## Author
 
-[Your name/organization]
+Scott McLeslie Fathom Robotics
 
 ## Acknowledgments
 
