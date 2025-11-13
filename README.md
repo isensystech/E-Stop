@@ -14,17 +14,17 @@ This system provides a safety-critical wireless emergency stop solution with the
 ### Transmitter (TX)
 - Emergency stop button with LED feedback
 - Visual status indication (flashing when stopped, solid when running)
-- Supports up to 4 switch inputs
 - Continuous heartbeat transmission
 - Built on Arduino-compatible hardware
 
 ### Receiver (RX)
-- Controls 4 independent safety relays
+- Controls 4 independent safety relays (engine power, beacon and 2 undefined)
 - Heartbeat monitoring with configurable timeout
 - Audible alarm (buzzer) on communication loss
 - Visual status indication via onboard LED
 - Requires minimum consecutive RUN packets before releasing safety relays
 - Failsafe operation - defaults to STOP state on power-up or communication loss
+- Bypass button ignores TX unit heartbeat and puts system in "Run" state
 
 ### Safety Features
 - **Heartbeat Monitoring**: 1-second timeout triggers alarm
@@ -38,19 +38,26 @@ This system provides a safety-critical wireless emergency stop solution with the
 ## Hardware Requirements
 
 ### Both Units
-- Arduino-compatible microcontroller (tested with Arduino)
-- E32 LoRa radio module (433MHz/868MHz/915MHz depending on region)
-- Power supply appropriate for your hardware
+- Arduino-compatible microcontroller Teensy 4.0
+- E32 LoRa radio module (433MHz)
+- 12V Power supply for RX unit and 9V Battery pack for TX
 
 ### Transmitter
 - Emergency stop button (normally open)
 - LED for status indication
-- Optional: 3 additional switches
+- Optional: 3 additional switches (not implemented)
+- Optional: GPS reciver (Not Implemented)
+- Optional: Buzzer (Not implemented)
+- Optional: SPI LCD Screen (Not Implemented)
+- Optional: I2C bus breakout (Not Implemented)
 
 ### Receiver
-- 4x relay modules (active-low control)
+- 4x relay modules (active-low control 2 Normally Open, 2 Normally Closed)
 - Piezo buzzer on pin 13
 - Onboard LED (pin 13)
+- E-stop override button to ingnore Transmitter heartbeat and resume "Run" state
+- E-stop override button LED pulsing for normal "Run" state heartbeat, solid for bypass state enabled, and off when in "Run" state but no heartbeat recived.
+- Optional: modem M0, M1 pins connected to MC for modem software reconfiguration.
 
 ## Pin Configuration
 
@@ -59,8 +66,8 @@ This system provides a safety-critical wireless emergency stop solution with the
 Pin 13: Onboard LED & Buzzer
 Pin 14: Relay 1 (E-Stop)
 Pin 15: Relay 2 (Run)
-Pin 16: Relay 3 (Pulse output)
-Pin 17: Relay 4 (Toggle indicator)
+Pin 16: Relay 3 (Toggle indicator)
+Pin 17: Relay 4 (Pulse output)
 Pin 12: Radio M0
 Pin 11: Radio M1
 Pin 2:  Radio AUX
@@ -140,7 +147,7 @@ Future versions will support runtime configuration via the transaction protocol 
 ### Communication Loss
 1. If no heartbeat received for 1 second, buzzer activates
 2. If no heartbeat for 8 seconds, relays open (failsafe)
-3. Relay 4 toggles every second to indicate fault condition
+3. Relay 4 toggles every second to indicate fault condition with the beacon
 4. Buzzer continues until unit is power cycled
 
 ## Safety Warnings
@@ -172,7 +179,7 @@ Contributions are welcome! Please:
 GPL
 
 ## Author
-
+Latest contributor: 
 Scott McLeslie Fathom Robotics
 
 ## Acknowledgments
