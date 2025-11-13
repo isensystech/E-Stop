@@ -1,6 +1,27 @@
+/*
+ * E-Stop Receiver (RX) Code
+ * Version 1.1
+ *
+ * Wireless emergency stop receiver using E32 LoRa radio module.
+ * Controls 4 safety relays based on heartbeat packets from transmitter.
+ *
+ * Features:
+ * - Heartbeat monitoring with 8-second timeout
+ * - 4 independent relay control (active-low)
+ * - 20-packet safety threshold before enabling RUN state
+ * - 1-second buzzer warning before failsafe
+ * - Override button to force RUN state (bypasses E-stop and timeout)
+ * - Override LED indication (blinking on heartbeat, solid when active)
+ * - Periodic buzzer in override mode (2 buzzes every 5 seconds)
+ * - Failsafe defaults to STOP state on power-up or timeout
+ * - SILENT mode support (disable all buzzer sounds)
+ *
+ * Hardware: Teensy 4.0 with E32 LoRa module
+ * Pin 13: Shared between onboard LED and buzzer (buzzer takes priority when active)
+ */
+
 #include <EasyTransfer.h>
 #include <Chrono.h>
-#include <EEPROM.h>
 
 //create object
 EasyTransfer ET; 
@@ -14,7 +35,7 @@ Chrono overrideBuzzerTimer;  // NEW: Timer for 5-second periodic buzzer in overr
 //#define ESTOP_TX
 //#define SILENT
 
-#define ESTOP_TIMEOUT 8   //should be read from EEPROM
+#define ESTOP_TIMEOUT 8   // Timeout in seconds before triggering failsafe
 #define ESTOP_MIN_RUN_PACKETS_LIMIT 20   //minimum number of consecutive RUN/GO packets to receive before allowing the relays to reset
 #define ESTOP_STOP 0
 #define ESTOP_RUN 1
@@ -25,33 +46,7 @@ Chrono overrideBuzzerTimer;  // NEW: Timer for 5-second periodic buzzer in overr
 
 struct SEND_DATA_STRUCTURE {
   uint8_t relays;
-  uint8_t cmd;        //bit 8: 0, read; 1, write -- bit 7-0: action command
-  uint8_t trans_id;   //transaction id (optional)
-  uint8_t data;       //data for cmd. ignored if the cmd is a read command
 };
-
-//struct EEPROM_STRUCTURE {
-//  int estop_timeout;
-//  int estop_min_run_packets_limit;
-//  int relay_pulse_time;
-//}
-
-#define TRANS_SET_ESTOP_TIMEOUT  0x81        //Timeout in seconds with no valid run command before opening the estop relay
-#define TRANS_SET_PAUSE_TIMEOUT  0x82        //Timeout in seconds with no valid run command before opening the pause relay
-#define TRANS_SET_RUN_COUNT_ENABLE 0x83      //Amount of valid RUN commands to receive before closing the estop and pause relay
-#define TRANS_SET_ESTOP_RELAY    0x88        //Command to close/open the estop relay. Close/open is determined by data byte (0 - open; 1 - close)
-#define TRANS_SET_PAUSE_RELAY    0x89        //Command to close/open the estop relay. Close/open is determined by data byte
-
-#define TRANS_WRITE_TO_EEPROM 0xA0       //Write the value of the current running value of the variable contained in data to EEPROM
-                                              //0x01  ESTOP_TIMEOUT
-                                              //0x02  PAUSE_TIMEOUT
-                                              //0x03  RUN_COUNT_ENABLE
-                                              
-#define TRANS_GET_ESTOP_TIMEOUT  0x01
-#define TRANS_GET_PAUSE_TIMEOUT  0x02
-#define TRANS_GET_RUN_COUNT_ENABLE 0x03
-#define TRANS_GET_ESTOP_RELAY 0x08
-#define TRANS_GET_PAUSE_RELAY 0x09
 
 
 
@@ -94,8 +89,8 @@ int runPackets = 0;
 int estopState = ESTOP_STOP;
 bool ononce = false; //Matt
 
-volatile signed long time_now;
-volatile signed long time_prev;
+volatile unsigned long time_now;
+volatile unsigned long time_prev;
 
 // NEW: Variables for new features
 bool buzzerActive = false;
@@ -177,20 +172,33 @@ void loop() {
 
 #if !defined(RELAY_TESTING)
   
-  if (ET.receiveData()) {    
+  if (ET.receiveData()) {
     cwdt.restart();  //restart counter
     buzzerTimer.restart();  // NEW: Restart buzzer timer on every valid packet
-    
+
     #ifdef ESTOP_RX
     Serial.println(estop.relays);
-    
-    // NEW: Blink E-stop override LED on heartbeat (if override not active)
-    bool overrideActive = (digitalRead(ESTOP_OVERRIDE_PIN) == HIGH);  // Active HIGH (open pins)
-    if (!overrideActive) {
-      digitalWrite(ESTOP_OVERRIDE_LED_PIN, !digitalRead(ESTOP_OVERRIDE_LED_PIN));
-    }
 
-    if (estop.relays & 1) {  // Big red button got pushed
+    // NEW: Check if E-stop override is active
+    bool overrideActive = (digitalRead(ESTOP_OVERRIDE_PIN) == HIGH);  // Active HIGH (open pins)
+
+    // If override is active, force RUN state and ignore E-stop button
+    if (overrideActive) {
+      estopState = ESTOP_RUN;
+      digitalWrite(RELAY1, RELAY_OFF);
+      digitalWrite(RELAY2, RELAY_ON);
+      digitalWrite(RELAY3, RELAY_OFF);
+      digitalWrite(RELAY4, RELAY_OFF);
+      noTone(13);
+      buzzerActive = false;
+      // LED stays solid (handled in main loop section)
+    }
+    // Normal operation (no override)
+    else {
+      // Blink E-stop override LED on heartbeat (if override not active)
+      digitalWrite(ESTOP_OVERRIDE_LED_PIN, !digitalRead(ESTOP_OVERRIDE_LED_PIN));
+
+      if (estop.relays & 1) {  // Big red button got pushed
       estopState = ESTOP_STOP; 
       time_now = millis();
       runPackets = 0;
@@ -198,22 +206,26 @@ void loop() {
       digitalWrite(RELAY1, RELAY_ON);
       digitalWrite(RELAY2, RELAY_OFF);
       digitalWrite(RELAY3, RELAY_ON); //Matt
-      if (!ononce && abs(time_now - time_prev) > RELAY_PULSE_TIME * 1000) {
+      if (!ononce && (time_now - time_prev) > RELAY_PULSE_TIME * 1000) {
           digitalWrite(RELAY3, RELAY_OFF);
         } //Matt
-      if (abs(time_now - time_prev) > RELAY_PULSE_TIME * 1000) {
+      if ((time_now - time_prev) > RELAY_PULSE_TIME * 1000) {
         time_prev = time_now;
         ononce = true; //Matt
         digitalWrite(RELAY4, !digitalRead(RELAY4));
-        //digitalWrite(13,!digitalRead(13));
-        //#if !defined(SILENT)
+        #if !defined(SILENT)
         tone(13, 4000);
-        //#endif
-        }    
+        #endif
+        }
     }
     else {  // Big red button is up!
       if (runPackets <= ESTOP_MIN_RUN_PACKETS_LIMIT) {
         runPackets++;
+        // Stop alarm buzzer since communication is restored (even if not in full RUN yet)
+        if (runPackets == 1) {
+          noTone(13);
+          buzzerActive = false;
+        }
       }
       else {   // Now in valid RUN/GO state
         estopState = ESTOP_RUN;
@@ -225,19 +237,10 @@ void loop() {
         noTone(13);
         buzzerActive = false;
       }
-      
+
     }
-    
-    
-    //digitalWrite(RELAY1, !(estop.relays & 1));  //relays are active low
-    //digitalWrite(RELAY2, !(estop.relays & 2));
-    //digitalWrite(RELAY3, !(estop.relays & 4));
-    //digitalWrite(RELAY4, !(estop.relays & 8));
+    }  // End of else (normal operation, no override)
 
-
-    //need to add a counter so that we can make sure we receive multiple positive commands before we enable the relays.
-    //right now we just enable them as soon as we receive a positive command
-    
     #endif  //ESTOP_RX
   }
   
@@ -261,7 +264,9 @@ void loop() {
     unsigned long elapsed = overrideBuzzerTimer.elapsed();
     if (elapsed < 100 || (elapsed >= 200 && elapsed < 300)) {
       // First buzz (0-100ms) or second buzz (200-300ms)
+      #if !defined(SILENT)
       tone(13, 2000);  // Half the frequency = less loud
+      #endif
     } else {
       noTone(13);
     }
@@ -273,21 +278,24 @@ void loop() {
   // NEW: Check if buzzer should activate after 1000ms without heartbeat (only if not in override)
   if (!overrideActive && buzzerTimer.hasPassed(BUZZER_TIMEOUT) && !buzzerActive) {
     buzzerActive = true;
+    #if !defined(SILENT)
     tone(13, 4000);
+    #endif
   }
 
-  if (cwdt.hasPassed(ESTOP_TIMEOUT * 1000)) {  //ESTOP_TIMEOUT seconds have passed since a valid packet
+  // Check for timeout - but NOT if override is active
+  bool overrideActiveTimeout = (digitalRead(ESTOP_OVERRIDE_PIN) == HIGH);
+  if (!overrideActiveTimeout && cwdt.hasPassed(ESTOP_TIMEOUT * 1000)) {  //ESTOP_TIMEOUT seconds have passed since a valid packet
       time_now = millis();
       runPackets = 0;
       digitalWrite(RELAY1, RELAY_ON);
       digitalWrite(RELAY2, RELAY_OFF);
-      if (abs(time_now - time_prev) > RELAY_PULSE_TIME * 1000) {
+      if ((time_now - time_prev) > RELAY_PULSE_TIME * 1000) {
         time_prev = time_now;
         digitalWrite(RELAY4, !digitalRead(RELAY4));
-        //digitalWrite(13, !digitalRead(13));
-        //#if !defined(SILENT)
+        #if !defined(SILENT)
           tone(13, 4000);
-        //#endif
+        #endif
       }
   }
   #endif  //ESTOP_RX

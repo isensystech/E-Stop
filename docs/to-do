@@ -1,0 +1,9 @@
+E-stop RX feature addition request.
+
+- [x] Buzzer needs to buzz after not receiving a heartbeat message from the transmitter unit for 1000ms
+- [x] Buzzer must stop buzzing when "E-Stopped" state returns to "Run" state.
+- [x] Blink (pin 22) e-stop override LED on heartbeat message received.  (Around 2.33Hz)
+- [x] Solid ON e-stop override LED (Pin 22) when the unit is e-stop override is active.
+- [x] Flip estop override button state (Override button now actually controls relay states)
+- [x] In estop override buzz every 5 seconds twice Less loud (Implemented: 2kHz, 2 buzzes every 5s)
+- [x] Estop bypass open in bypass mode (Override forces relays to RUN state, bypassing E-stop and timeout)

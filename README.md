@@ -24,7 +24,10 @@ This system provides a safety-critical wireless emergency stop solution with the
 - Visual status indication via onboard LED
 - Requires minimum consecutive RUN packets before releasing safety relays
 - Failsafe operation - defaults to STOP state on power-up or communication loss
-- Bypass button ignores TX unit heartbeat and puts system in "Run" state
+- **Override/Bypass button** (Pin 23) forces system into RUN state, ignoring TX heartbeat and E-stop button
+  - Bypasses timeout failsafe when active
+  - Relays forced to RUN configuration regardless of transmitter state
+  - Periodic buzzer alert (2 buzzes every 5 seconds at 2kHz)
 
 ### Safety Features
 - **Heartbeat Monitoring**: 1-second timeout triggers alarm
@@ -52,22 +55,27 @@ This system provides a safety-critical wireless emergency stop solution with the
 - Optional: I2C bus breakout (Not Implemented)
 
 ### Receiver
-- 4x relay modules (active-low control 2 Normally Open, 2 Normally Closed)
-- Piezo buzzer on pin 13
-- Onboard LED (pin 13)
-- E-stop override button to ingnore Transmitter heartbeat and resume "Run" state
-- E-stop override button LED pulsing for normal "Run" state heartbeat, solid for bypass state enabled, and off when in "Run" state but no heartbeat recived.
-- Optional: modem M0, M1 pins connected to MC for modem software reconfiguration.
+- 4x relay modules (active-low control: 2 Normally Open, 2 Normally Closed)
+- Piezo buzzer on pin 13 (shared with onboard LED)
+- Onboard LED (pin 13, shared with buzzer - buzzer takes priority when active)
+- E-stop override button (Pin 23) to force RUN state and bypass heartbeat requirement
+- E-stop override LED (Pin 22):
+  - Blinking: Normal operation with heartbeat received
+  - Solid: Override mode active
+  - Off: No heartbeat and override not active
+- Optional: modem M0, M1 pins connected to MCU for software reconfiguration
 
 ## Pin Configuration
 
 ### Receiver (RX)
 ```
-Pin 13: Onboard LED & Buzzer
+Pin 13: Onboard LED & Buzzer (shared - buzzer takes priority when active)
 Pin 14: Relay 1 (E-Stop)
 Pin 15: Relay 2 (Run)
 Pin 16: Relay 3 (Toggle indicator)
 Pin 17: Relay 4 (Pulse output)
+Pin 22: E-stop Override LED
+Pin 23: E-stop Override Button (INPUT_PULLUP, active HIGH)
 Pin 12: Radio M0
 Pin 11: Radio M1
 Pin 2:  Radio AUX
@@ -88,25 +96,77 @@ Pin 2:  Radio AUX
 Serial1: E32 Radio communication (9600 baud)
 ```
 
-## Installation
+## Project Structure
 
-1. Clone this repository:
-```bash
-git clone https://github.com/yourusername/wireless-estop-system.git
+```
+E-Stop/
+├── README.md                  # This file
+├── estop_tx/                  # Transmitter sketch folder
+│   └── estop_tx.ino          # TX Arduino sketch
+├── estop_rx/                  # Receiver sketch folder
+│   └── estop_rx.ino          # RX Arduino sketch
+├── libraries/                 # Required libraries (included)
+│   ├── EasyTransfer/         # EasyTransfer library
+│   └── Chrono/               # Chrono timing library
+├── hardware/                  # Hardware documentation
+│   ├── EStop Receiver Pinout.png
+│   ├── eStopH_v0.3_Schematic (1).pdf  # Transmitter schematic
+│   └── eStopR_v0.3_Schematic.pdf      # Receiver schematic
+└── docs/                      # Additional documentation
+    └── to-do                  # Feature checklist
 ```
 
-2. Install required libraries:
-   - [EasyTransfer](https://github.com/madsci1016/Arduino-EasyTransfer)
-   - [Chrono](https://github.com/SofaPirate/Chrono)
-   - EEPROM (included with Arduino IDE)
+## Installation
+
+### Option 1: Using This Repository (Recommended)
+
+1. Clone this repository with libraries included:
+```bash
+git clone https://github.com/isensystech/E-Stop.git
+cd E-Stop
+```
+
+2. Copy the libraries to your Arduino libraries folder:
+```bash
+# On macOS/Linux:
+cp -r libraries/* ~/Documents/Arduino/libraries/
+
+# On Windows:
+# Copy libraries/* to Documents\Arduino\libraries\
+```
 
 3. Open the appropriate sketch in Arduino IDE:
-   - `estop_tx.ino` for transmitter
-   - `estop_rx.ino` for receiver
+   - Open `estop_tx/estop_tx.ino` for transmitter
+   - Open `estop_rx/estop_rx.ino` for receiver
 
 4. Configure the `#define` directives at the top of each file to match your hardware
 
-5. Upload to your respective Arduino boards
+5. Select **Tools → Board → Teensy 4.0** in Arduino IDE
+
+6. Upload to your respective Teensy boards
+
+### Option 2: Manual Library Installation
+
+If you prefer to install libraries through Arduino IDE:
+
+1. Clone this repository:
+```bash
+git clone https://github.com/isensystech/E-Stop.git
+```
+
+2. Install required libraries via Arduino Library Manager:
+   - Open Arduino IDE
+   - Go to **Sketch → Include Library → Manage Libraries**
+   - Search for and install:
+     - **Chrono** by Thomas O Fredericks
+   - Note: EasyTransfer must be installed manually (see below)
+
+3. Install EasyTransfer manually:
+   - Download from [GitHub](https://github.com/madsci1016/Arduino-EasyTransfer)
+   - Extract to `Documents/Arduino/libraries/EasyTransfer`
+   - Restart Arduino IDE
+
+4. Open sketches and upload as described above
 
 ## Configuration
 
@@ -127,8 +187,6 @@ Edit the `#define` directives in each sketch:
 #define SILENT         // Uncomment to disable buzzer
 ```
 
-### Runtime Configuration
-Future versions will support runtime configuration via the transaction protocol defined in the code.
 
 ## Operation
 
@@ -164,7 +222,7 @@ Future versions will support runtime configuration via the transaction protocol 
 
 ## Protocol
 
-The system uses the EasyTransfer library for packet-based communication. Future versions will implement the full transaction protocol defined in the code for runtime configuration.
+The system uses the EasyTransfer library for packet-based communication. The data structure contains a single byte indicating the relay states based on switch inputs from the transmitter.
 
 ## Contributing
 

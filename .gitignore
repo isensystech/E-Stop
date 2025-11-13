@@ -1,0 +1,17 @@
+# Git folders from library submodules
+libraries/*/.git
+libraries/*/.github
+
+# Arduino build files
+*.hex
+*.elf
+*.bin
+*.map
+
+# macOS files
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
