@@ -6,12 +6,14 @@ E-stop RX feature addition request.
 - [x] Solid ON e-stop override LED (Pin 22) when the unit is e-stop override is active.
 - [x] Flip estop override button state. Estop bypass open in bypass mode 
 - [x] In estop override buzz every 5 seconds twice Less loud. 
-- [ ] Implement GPS featurs (transmit coordinates, timestamp, distance from 'mission start')
+- [ ] Implement GPS features (transmit coordinates, timestamp, distance from 'mission start')
+- [ ] Add backup battery.
+- [ ] Cellular integration for greater range.
   
 E-stop TX feature addition request.
-- [ ] Empliment LCD screen
+- [ ] Implement LCD screen
 - [ ] Add 3 additional switches.
-- [ ] Breakout uart and include water short curceting protection
+- [ ] Breakout uart and include short circuit protection
 
 LCD Feature request.
 - [ ] [LCD] must have pulsing indicator with heartbeat
